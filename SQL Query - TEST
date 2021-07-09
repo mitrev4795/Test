@@ -1,0 +1,36 @@
+with merchants_auto as (
+    SELECT ms.merchant_id
+         , ms.first_name
+         , ms.last_name
+         , c.en_name as country
+         , ms.signup_time
+         , ms.account_completion_time
+         , mvl.created_at
+         , mvl.verification_status
+    FROM merchant_signups ms
+             LEFT JOIN countries c on c.id = ms.country_id /* I could also employ a INNER JOIN here, but as I do not have access to the tables' rows and columns, I play safe and do a left join.
+                                                  The excel example has no missing values in the country columns so we either have an INNER JOIN or There are no merchants without a country id (and thus inner or left would not matter.) */
+
+             LEFT JOIN merchant_verification_logs mvl on mvl.merchant_id = ms.merchant_id /* If a merchant has auto-verification enabled, he would have either pass or fail + timestamp ,
+                                                                                 if no auto verification OR no completion of account, we will have NULL values in created_at and status columns */
+)
+, merchant_latest_onboarding_prep as (   -- Initial CTE to prepare data
+    SELECT mol.id
+         , mol.merchant_id
+         , mol.created_at
+         , mol.onboarding_status
+         , row_number() over (partition by mol.merchant_id order by mol.created_at desc) latest_status_flag  -- Rank the statuses based on created_at order (descending)
+    FROM merchant_onboarding_logs mol )
+
+, merchant_latest_onboarding as (
+    SELECT *
+    FROM merchant_latest_onboarding_prep mlop
+    WHERE mlop.latest_status_flag = 1  -- Filter only the number one row to remain. As the column is timestamp, I am confident that I will have no same status for a merchant_id that is at the exact same time.
+                                       -- Of course, we can employ other logic like MAX and using correlated subquery, but this will impact performance.
+)
+
+SELECT ma.*
+     , mlo.created_at as latest_onboarding_date
+     , mlo.onboarding_status
+FROM merchants_auto ma
+LEFT JOIN merchant_latest_onboarding mlo on mlo.merchant_id = ma.merchant_id -- LEFT JOINING the Onboarding table with the latest status. If a merchant has not finished completion or has passed verification, we will have NULL values for onboarding
